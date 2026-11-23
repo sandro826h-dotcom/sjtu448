@@ -60,17 +60,25 @@ function fmt(s,self){
 var LS='sjtu448.v1',S={e:{},cfg:{exam:META.exam||'2026-12-19',hide:true},u:0};
 try{var raw=localStorage.getItem(LS);if(raw){var o=JSON.parse(raw);if(o&&o.e)S=o;S.cfg=S.cfg||{};if(!S.cfg.exam)S.cfg.exam=META.exam||'2026-12-19';if(S.cfg.hide===undefined)S.cfg.hide=true}}catch(e){}
 function today(){var d=new Date();return Math.floor((d.getTime()-d.getTimezoneOffset()*60000)/86400000)}
-var IV=[1,2,4,8,16,30];
+/* 复习规则（v1.0）
+   b = 不同日子里连续“会了”的次数。
+   不会：b 归零，明天再测，本轮结束前再出现一次。模糊：b 归零，明天再测。
+   会了：b+1（同一天重复点不加），间隔按 b 取 2、4、7、14 天。
+   所有间隔都不超过“距考试天数 − 2”，保证考前两天内每条至少再见一次。
+   标记：红＝上次不会；黄＝上次模糊，或只会过一次；绿（掌握）＝隔天再测仍然会（b≥2）。 */
+var IV=[0,2,4,7,14];
 function st(id){return S.e[id]}
-function mark(id){var s=st(id);if(!s)return '';return s.b<=0?'r':(s.b===1?'y':'g')}
+(function(){Object.keys(S.e).forEach(function(id){var x=S.e[id];if(x&&!x.v){x.b=x.r===2?Math.max(1,(x.b||1)-1):0;x.v=2}})})();
+function mark(id){var s=st(id);if(!s)return '';if(s.r===0)return 'r';return s.b>=2?'g':'y'}
 function rate(id,r){
-  var s=S.e[id]||{b:-1},t=today();
-  if(r===0){s.b=0}else if(r===1){s.b=Math.max(1,Math.min(s.b,1))}else{s.b=s.b<1?2:Math.min(s.b+1,5)}
-  s.d=t+(r===0?1:(r===1?2:IV[s.b])); s.r=r; s.u=Date.now(); S.e[id]=s; save();
+  var s=S.e[id]||{b:0},t=today(),dl=daysLeft(),iv;
+  if(r===2){if(s.ld!==t){s.b=(s.b||0)+1;s.ld=t}iv=IV[Math.min(s.b,4)]||2}else{s.b=0;iv=1}
+  if(dl!==null&&dl>2)iv=Math.min(iv,Math.max(1,dl-2));
+  s.d=t+iv; s.r=r; s.v=2; s.u=Date.now(); S.e[id]=s; save();
 }
 var saveT=null;
 function save(){S.u=Date.now();try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){} clearTimeout(saveT);saveT=setTimeout(push,4000)}
-function due(){var t=today();return ORDER.filter(function(id){var s=st(id);return s&&s.d<=t})}
+function due(){var t=today();return ORDER.filter(function(id){var s=st(id);return s&&s.d<=t}).sort(function(a,b){return (S.e[a].d-S.e[b].d)||(E[a].p-E[b].p)})}
 function daysLeft(){var p=(S.cfg.exam||'').split('-');if(p.length<3)return null;var d=Date.UTC(+p[0],p[1]-1,+p[2])/86400000;return Math.round(d-today())}
 function counts(ids){var c={n:ids.length,g:0,y:0,r:0};ids.forEach(function(id){var m=mark(id);if(m)c[m]++});return c}
 function bar(c){if(!c.n)return '';function w(x){return (100*x/c.n).toFixed(1)+'%'}return '<div class="bar"><i class="g" style="width:'+w(c.g)+'"></i><i class="y" style="width:'+w(c.y)+'"></i><i class="r" style="width:'+w(c.r)+'"></i></div>'}
@@ -116,7 +124,7 @@ function tags(e){
 function item(e){
   var m=mark(e.id);
   return '<a class="it" href="#e-'+e.id+'"><span class="dot p'+(e.p||3)+'"></span><span class="it-m"><span class="it-t">'+esc(e.t)+'</span>'+
-    (e.exam&&e.exam.length?'<span class="tag ex">考过</span>':'')+'<span class="it-o">'+esc(e.one||'')+'</span></span><span class="ms '+m+'">'+(m?'●':'')+'</span></a>';
+    (e.exam&&e.exam.length?'<span class="tag ex">考过</span>':'')+(S.cfg.hideOne?'':'<span class="it-o">'+esc(e.one||'')+'</span>')+'</span><span class="ms '+m+'">'+(m?'●':'')+'</span></a>';
 }
 function toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},1600)}
 function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t}return a}
@@ -177,19 +185,21 @@ function tbl(t){
 }
 
 /* ---------- 视图：条目 ---------- */
-var FLOW=null,SHOWN={};
+var FLOW=S.flow||null,SHOWN={};
+function setFlow(f){FLOW=f;S.flow=f;save()}
+function flowBar(){var old=document.getElementById('flowbar');if(old)old.remove();if(!FLOW)return;var cur=FLOW.q[FLOW.i];if(location.hash==='#e-'+cur)return;var d=document.createElement('div');d.id='flowbar';d.className='card';d.style.cssText='margin-bottom:12px;border-color:var(--accent)';d.innerHTML='正在进行“'+esc(FLOW.name)+'”，第 '+(FLOW.i+1)+' / '+FLOW.q.length+' 条。<a href="#e-'+cur+'"><b>回到当前条：'+esc(E[cur]?E[cur].t:'')+'</b></a> · <a href="#home" data-act="exit">结束本轮</a>';app.prepend(d)}
 function vEntry(id){
   var e=E[id];if(!e)return vHome();
   var b=BY_B[e.b],c=CL[e.cid],h='';
-  if(FLOW&&FLOW.q[FLOW.i]===id)h+='<p class="note">'+FLOW.name+' '+(FLOW.i+1)+' / '+FLOW.q.length+'。<a href="#home" data-act="exit">退出</a></p>';
+  if(FLOW&&FLOW.q[FLOW.i]===id)h+='<p class="note">“'+esc(FLOW.name)+'”第 '+(FLOW.i+1)+' / '+FLOW.q.length+' 条。点关联词条去看也没关系，顶部会有“回到当前条”。<a href="#home" data-act="exit">结束本轮</a></p>';
   h+='<p class="crumb"><a href="#home">首页</a> › <a href="#b'+e.b+'">'+esc(b.title)+'</a>'+(c?' › '+esc(c.name):'')+'</p>';
   h+='<h1>'+esc(e.t)+'</h1><div>'+tags(e)+'</div>';
-  if(e.one)h+='<p>'+fmt(e.one,id)+'</p>';
-  if(c&&c.line)h+='<p class="cl-line">所在线索：'+fmt(c.line,id)+'</p>';
   var hide=S.cfg.hide&&!SHOWN[id];
   if(hide){
-    h+='<button class="veil" data-act="show">先在心里答三个要点：'+(e.kind==='合称'?'全部成员是谁？':'是什么、有什么、为什么重要？')+'<br>想好了点这里看答案</button>';
+    h+='<button class="veil" data-act="show">只看标题，先独立回忆：'+(e.kind==='合称'?'全部成员是谁，各有什么代表作？':'是什么（时代、身份或性质）、有什么（代表作、内容、成员）、为什么重要？')+'<br>最好在纸上或心里说完整，再点这里看答案</button>';
   }else{
+    if(e.one)h+='<p>'+fmt(e.one,id)+'</p>';
+    if(c&&c.line)h+='<p class="cl-line">所在线索：'+fmt(c.line,id)+'</p>';
     if(e.members&&e.members.length){
       h+='<div class="sec"><h3>成员</h3><div class="tw"><table>'+e.members.map(function(m){return '<tr><td><b>'+fmt(m[0],id)+'</b></td><td>'+fmt(m[1]||'',id)+'</td></tr>'}).join('')+'</table></div></div>';
     }
@@ -205,7 +215,7 @@ function vEntry(id){
     if(rel.length)h+='<div class="sec rel"><h3>关联与串联</h3><ul>'+rel.join('')+'</ul></div>';
   }
   var cur=mark(id),s=st(id);
-  h+='<div class="rate"><button class="r'+(s&&s.r===0?' on':'')+'" data-rate="0">不会</button><button class="y'+(s&&s.r===1?' on':'')+'" data-rate="1">模糊</button><button class="g'+(s&&s.r===2?' on':'')+'" data-rate="2">会了</button></div>';
+  h+='<div class="rate"><button class="r'+(s&&s.r===0?' on':'')+'" data-rate="0">不会</button><button class="y'+(s&&s.r===1?' on':'')+'" data-rate="1">模糊</button><button class="g'+(s&&s.r===2?' on':'')+'" data-rate="2">会了</button></div><p class="note">不会：想不起来，或关键事实说错。模糊：只想起一部分，成员缺漏，或想了很久才出来。会了：不看答案就能说出定义和三个得分点（合称要说全成员），没有错。拿不准时选低一档。</p>';
   if(c){
     var k=c.items.indexOf(id),pv=c.items[k-1],nx=c.items[k+1];
     if(!nx){var bi=b.clusters.indexOf(c),nc=b.clusters[bi+1];if(nc&&nc.items.length)nx=nc.items[0]}
@@ -259,7 +269,7 @@ function vRules(){
 }
 
 /* ---------- 视图：学习流、自测 ---------- */
-function startFlow(name,q){if(!q.length){toast('没有符合条件的条目');location.hash='#home';return}FLOW={name:name,q:q,i:0};SHOWN={};location.hash='#e-'+q[0]}
+function startFlow(name,q){if(!q.length){toast('没有符合条件的条目');location.hash='#home';return}setFlow({name:name,q:q,i:0,again:[]});SHOWN={};location.hash='#e-'+q[0]}
 function learnQueue(){
   var out=[];[1,2,3].forEach(function(p){if(out.length>=20)return;ORDER.forEach(function(id){if(out.length<20&&E[id].p===p&&!st(id))out.push(id)})});
   return out;
@@ -290,9 +300,9 @@ function vSearch(q){
 }
 function vMe(){
   var h='<h1>设置与同步</h1>';
-  h+='<div class="card"><p><label for="exam">初试日期 </label><input id="exam" type="date" value="'+esc(S.cfg.exam)+'"></p><p><label><input id="hide" type="checkbox"'+(S.cfg.hide?' checked':'')+'> 打开词条时先遮住答案（先回忆再看）</label></p><p class="note">进度同步状态：'+esc(SYNC)+'。在 Claude 里打开本页时，同一账号的手机和电脑自动合并进度；在独立网址或离线文件里打开时，进度只存在当前浏览器，换设备请用下面的“下载进度文件”和“从文件导入”。</p></div>';
+  h+='<div class="card"><p><label for="exam">初试日期 </label><input id="exam" type="date" value="'+esc(S.cfg.exam)+'"></p><p><label><input id="hide" type="checkbox"'+(S.cfg.hide?' checked':'')+'> 打开词条时先遮住答案和简介（先回忆再看）</label></p><p><label><input id="hideOne" type="checkbox"'+(S.cfg.hideOne?' checked':'')+'> 板块和搜索列表里也不显示一句话简介</label></p><p class="note">进度同步状态：'+esc(SYNC)+'。在 Claude 里打开本页时，同一账号的手机和电脑自动合并进度；在独立网址或离线文件里打开时，进度只存在当前浏览器，换设备请用下面的“下载进度文件”和“从文件导入”。</p></div>';
   h+='<h2>手动转移进度</h2><p class="note">离线版或同步不可用时：在一台设备上复制下面的文字，到另一台设备粘贴后点“导入”。</p><textarea id="io">'+esc(JSON.stringify(S))+'</textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="copy">复制</button><button class="btn" data-act="import">导入</button><button class="btn" data-act="dl">下载进度文件</button><label class="btn" for="upf">从文件导入</label><input id="upf" type="file" accept=".json,application/json,text/plain" hidden><button class="btn" data-act="reset">清空全部进度</button></div>';
-  h+='<h2>图例</h2><p><span class="tag pp1">必背</span> 能写完整名解。<span class="tag pp2">熟悉</span> 能写三个要点，选择题能选对。<span class="tag pp3">了解</span> 认得出，能写一两句。<span class="tag ex">2024名解</span> 交大考过的届别与题型（X 届指 X−1 年 12 月的考试）。</p>';
+  h+='<h2>图例</h2><p><span class="tag pp1">必背</span> 能写完整名解。<span class="tag pp2">熟悉</span> 能写三个要点，选择题能选对。<span class="tag pp3">了解</span> 认得出，能写一两句。<span class="tag ex">2024名解</span> 交大考过的届别与题型（X 届指 X−1 年 12 月的考试）。</p><h2>复习怎么排</h2><p>不会、模糊：明天再出现；本轮点了“不会”的，本轮最后还会再考一次。会了：连续会的次数越多，间隔越长，依次 2、4、7、14 天；同一天重复点“会了”只算一次。所有间隔都会压到考试前两天以内，所以考前每条都会再见一次。颜色：红＝上次不会；黄＝上次模糊，或只会过一次；绿＝掌握，即隔天再测仍然会。“复习到期”每轮最多 60 条，先排逾期最久的，同样逾期的先排必背。</p>';
   app.innerHTML=h;
 }
 
@@ -308,7 +318,7 @@ function route(){
   var hsh=(location.hash||'#home').slice(1)||'home';
   nav(hsh);
   if(hsh==='learn')return startFlow('学新条目',learnQueue());
-  if(hsh==='review')return startFlow('复习',due());
+  if(hsh==='review')return startFlow('复习',due().slice(0,60));
   if(hsh==='recall')return startFlow('名解抽背',shuffle(ORDER.filter(function(id){return E[id].p===1})).slice(0,6));
   if(hsh.indexOf('e-')===0)vEntry(hsh.slice(2));
   else if(/^b\d\d$/.test(hsh))vBoard(hsh.slice(1));
@@ -320,6 +330,7 @@ function route(){
   else if(hsh==='me')vMe();
   else if(hsh==='search')vSearch(SQ);
   else vHome();
+  flowBar();
   window.scrollTo(0,0);
 }
 window.addEventListener('hashchange',route);
@@ -330,8 +341,11 @@ document.addEventListener('click',function(ev){
   if(t.dataset.rate!==undefined){
     var id=hsh.slice(2);rate(id,+t.dataset.rate);
     if(FLOW&&FLOW.q[FLOW.i]===id){
-      FLOW.i++;if(FLOW.i<FLOW.q.length){location.hash='#e-'+FLOW.q[FLOW.i]}else{var nm=FLOW.name;FLOW=null;toast(nm+'完成');location.hash='#home'}
-    }else{toast('已记录');vEntry(id)}
+      FLOW.again=FLOW.again||[];
+      if(+t.dataset.rate===0&&FLOW.again.indexOf(id)<0){FLOW.again.push(id);FLOW.q.push(id)}
+      FLOW.i++;
+      if(FLOW.i<FLOW.q.length){setFlow(FLOW);location.hash='#e-'+FLOW.q[FLOW.i]}else{var nm=FLOW.name;setFlow(null);toast(nm+'完成');location.hash='#home'}
+    }else{toast('已记录（不影响正在进行的那一轮）');vEntry(id);flowBar()}
     return;
   }
   if(t.dataset.f){var k=t.dataset.f;if(k==='p')FIL.p=+t.dataset.v;else FIL[k]=!FIL[k];vBoard(hsh.slice(1));return}
@@ -348,7 +362,7 @@ document.addEventListener('click',function(ev){
   }
   var a=t.dataset.act;
   if(a==='show'){SHOWN[hsh.slice(2)]=1;vEntry(hsh.slice(2));window.scrollTo(0,0)}
-  else if(a==='exit'){FLOW=null}
+  else if(a==='exit'){setFlow(null)}
   else if(a==='peek'){t.nextElementSibling.hidden=!t.nextElementSibling.hidden}
   else if(a==='again'){ev.preventDefault();vQuiz();window.scrollTo(0,0)}
   else if(a==='copy'){var io=$('#io');io.select();try{navigator.clipboard.writeText(io.value).then(function(){toast('已复制')},function(){toast('请手动长按复制')})}catch(e){toast('请手动长按复制')}}
@@ -359,6 +373,7 @@ document.addEventListener('click',function(ev){
 document.addEventListener('change',function(ev){
   if(ev.target.id==='exam'){S.cfg.exam=ev.target.value;save()}
   if(ev.target.id==='hide'){S.cfg.hide=ev.target.checked;save()}
+  if(ev.target.id==='hideOne'){S.cfg.hideOne=ev.target.checked;save()}
   if(ev.target.id==='upf'&&ev.target.files&&ev.target.files[0]){var fr=new FileReader();fr.onload=function(){try{var o=JSON.parse(fr.result);if(merge(o)){save();toast('已导入并合并')}else toast('没有更新的记录')}catch(e){toast('文件格式不对')}};fr.readAsText(ev.target.files[0])}
 });
 route();
